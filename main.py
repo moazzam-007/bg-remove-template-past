@@ -16,53 +16,56 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Flask app for Render's web service
+# -- Bot ko start karne ka function --
+def run_bot():
+    """Initializes and runs the Telegram bot in polling mode."""
+    logger.info("Attempting to start the Telegram Bot...")
+    
+    # Bot token check
+    bot_token = Config.BOT_TOKEN
+    if not bot_token:
+        logger.error("FATAL: TELEGRAM_BOT_TOKEN environment variable not set!")
+        return
+        
+    # Application setup
+    application = Application.builder().token(bot_token).build()
+    
+    # Handler setup
+    bot_handler = BotHandler()
+    application.add_handler(CommandHandler("start", bot_handler.start_command))
+    application.add_handler(MessageHandler(filters.PHOTO, bot_handler.handle_photo))
+    application.add_handler(MessageHandler(filters.Document.IMAGE, bot_handler.handle_document))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot_handler.handle_text))
+    application.add_error_handler(bot_handler.error_handler)
+
+    # Bot ko start karo
+    logger.info("Bot polling is starting now...")
+    application.run_polling(allowed_updates=['message'])
+    logger.info("Bot polling has stopped.")
+
+
+# -- Ye code ab Gunicorn ke import karte hi chalega --
+# 1. Temp directory banao
+os.makedirs(Config.TEMP_DIR, exist_ok=True)
+
+# 2. Bot ko ek alag thread me chalao
+bot_thread = threading.Thread(target=run_bot)
+bot_thread.daemon = True
+bot_thread.start()
+logger.info("Bot thread has been created and started.")
+
+
+# -- Flask App (Render ke health check ke liye) --
 app = Flask(__name__)
 
 @app.route('/')
 def home():
     """Provides a simple health check endpoint."""
-    bot_status = "RUNNING" if 'bot_thread' in globals() and bot_thread.is_alive() else "STOPPED"
-    return f"<h1>Bot is {bot_status}</h1>", 200
-
-def run_bot():
-    """Initializes and runs the Telegram bot."""
-    logger.info("Starting Telegram Bot...")
+    # Check if the bot thread is alive
+    is_running = bot_thread.is_alive()
+    bot_status = "RUNNING" if is_running else "STOPPED"
+    status_code = 200 if is_running else 503
     
-    # Get bot token
-    bot_token = Config.BOT_TOKEN
-    if not bot_token:
-        logger.error("TELEGRAM_BOT_TOKEN environment variable not set!")
-        return
-        
-    # Create application
-    application = Application.builder().token(bot_token).build()
+    logger.info(f"Health check endpoint hit. Bot status: {bot_status}")
     
-    # Initialize bot handler
-    bot_handler = BotHandler()
-    
-    # Add handlers
-    application.add_handler(CommandHandler("start", bot_handler.start_command))
-    application.add_handler(MessageHandler(filters.PHOTO, bot_handler.handle_photo))
-    application.add_handler(MessageHandler(filters.Document.IMAGE, bot_handler.handle_document))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot_handler.handle_text))
-    
-    # Error handler
-    application.add_error_handler(bot_handler.error_handler)
-
-    # Start polling
-    application.run_polling(allowed_updates=['message'])
-
-if __name__ == '__main__':
-    # Ensure temp directory exists
-    os.makedirs(Config.TEMP_DIR, exist_ok=True)
-    
-    # Run the bot in a separate thread
-    bot_thread = threading.Thread(target=run_bot)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    # Run the Flask app (for Gunicorn)
-    # The 'app' object is automatically picked up by Gunicorn
-    logger.info("Flask app is ready to be served by Gunicorn.")
-    # For local testing, you would run: app.run(host='0.0.0.0', port=5000)
+    return f"<h1>Bot status: {bot_status}</h1>", status_code
