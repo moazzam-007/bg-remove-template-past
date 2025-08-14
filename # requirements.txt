@@ -1,0 +1,6 @@
+python-telegram-bot
+rembg
+Pillow
+Flask
+gunicorn
+redis
